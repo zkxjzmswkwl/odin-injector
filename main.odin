@@ -6,6 +6,8 @@ import w "core:sys/windows"
 
 foreign import k32 "system:kernel32.lib"
 
+//----------------------------------------------------------------------------------------------------
+// core:sys/windows was missing this structure.
 process_entry :: struct {
 	dwSize: w.DWORD
 	cntUsage: w.DWORD
@@ -17,21 +19,16 @@ process_entry :: struct {
 	dwFlags: w.DWORD
 	szExeFile: [260]w.CHAR
 }
-
-
+//----------------------------------------------------------------------------------------------------
+// core:sys/windows was missing these functions.
 foreign k32 {
-
-	CreateToolhelp32Snapshot :: proc(dwFlags: w.DWORD, th32ProcessID: w.DWORD) -> w.HANDLE ---
-	Process32First :: proc(hSnapshot: w.HANDLE, lppe: ^process_entry) -> int     ---
-	Process32Next :: proc(hSnapshot: w.HANDLE, lppe: ^process_entry) -> int     ---
-	OpenProcess :: proc(dwDesiredAccess: u32, bInheritHandle: int, dwProcessId: u32) -> w.HANDLE ---
+	// I'd imagine `---` denotes as a forward declaration? Bit weird.
+	CreateToolhelp32Snapshot :: proc(dwFlags: w.DWORD, th32ProcessID: w.DWORD) -> w.HANDLE                    ---
+	Process32First           :: proc(hSnapshot: w.HANDLE, lppe: ^process_entry) -> int                        ---
+	Process32Next            :: proc(hSnapshot: w.HANDLE, lppe: ^process_entry) -> int                        ---
+	OpenProcess              :: proc(dwDesiredAccess: u32, bInheritHandle: int, dwProcessId: u32) -> w.HANDLE ---
 }
-
-
-enum_w_callback :: proc(hwnd: w.HWND, lparam: w.LPARAM) {
-	fmt.println("enum_w_callback")
-}
-
+//----------------------------------------------------------------------------------------------------
 filter_processes :: proc(file_name: string) -> u32 {
 	fmt.println("filter_processes")
 
@@ -45,6 +42,16 @@ filter_processes :: proc(file_name: string) -> u32 {
 		fmt.println("k32.Process32First failed.")
 	}
 
+	/*
+		This sucks. Not entirely sure how to go about taking
+		an `[]u8` and get it to a place where I can perform comparisons 
+		with a string. 
+
+		The result is iterating over the characters and using Odin's string builder
+		to write each byte. Even then, the result wasn't what I'd wanted.
+
+		So fuck it `strings.contains`. ¯\_(ツ)_/¯
+	*/
 	for Process32Next(snapshot_handle, &pe32) == 1 {
 		remote_buffer: strings.Builder
 		strings.builder_init(&remote_buffer)
@@ -65,20 +72,24 @@ filter_processes :: proc(file_name: string) -> u32 {
 	w.CloseHandle(snapshot_handle)
 	return process_id
 }
-
+//----------------------------------------------------------------------------------------------------
 inject_dll :: proc(process_id: u32, module_path: string) {
 	fmt.println(strings.clone_to_cstring(module_path))
 	proc_handle := OpenProcess(0x000F000 | 0x00100000 | 0xFFFF, 0, process_id)
+	// The shite cast is required... I think?
 	load_library := cast(proc "stdcall" (rawptr) -> u32)w.GetProcAddress(w.GetModuleHandleA("kernel32.dll"), "LoadLibraryA")
 
 	remote := w.VirtualAllocEx(proc_handle, nil, len(module_path), w.MEM_RESERVE | w.MEM_COMMIT, w.PAGE_READWRITE)
+	// this `rawptr(strings.clone_to_cstring(string))` is not cool, and no, `rawptr(cstring(string))` did not work.
 	w.WriteProcessMemory(proc_handle, remote, rawptr(strings.clone_to_cstring(module_path)), len(module_path), nil)
 	w.CreateRemoteThread(proc_handle, nil, 0, load_library, remote, 0, nil)
 	w.CloseHandle(proc_handle)
 }
-
+//----------------------------------------------------------------------------------------------------
 main :: proc() {
 	process_id := filter_processes("rs2client.exe")
 	fmt.println(process_id)
 	inject_dll(process_id, "C:/Users/Carter/petergriffin/build/RelWithDebInfo/PeterGriffin.dll")
 }
+//----------------------------------------------------------------------------------------------------
+
