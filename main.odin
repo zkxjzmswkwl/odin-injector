@@ -75,13 +75,15 @@ filter_processes :: proc(file_name: string) -> u32 {
 //----------------------------------------------------------------------------------------------------
 inject_dll :: proc(process_id: u32, module_path: string) {
 	fmt.println(strings.clone_to_cstring(module_path))
-	proc_handle := OpenProcess(0x000F000 | 0x00100000 | 0xFFFF, 0, process_id)
-	// The shite cast is required... I think?
-	load_library := cast(proc "stdcall" (rawptr) -> u32)w.GetProcAddress(w.GetModuleHandleA("kernel32.dll"), "LoadLibraryA")
 
+	module_path_cstring := strings.clone_to_cstring(module_path)
+	defer delete(module_path_cstring)
+
+	proc_handle := OpenProcess(0x000F000 | 0x00100000 | 0xFFFF, 0, process_id)
+	load_library := cast(proc "stdcall" (rawptr) -> u32)w.GetProcAddress(w.GetModuleHandleA("kernel32.dll"), "LoadLibraryA")
 	remote := w.VirtualAllocEx(proc_handle, nil, len(module_path), w.MEM_RESERVE | w.MEM_COMMIT, w.PAGE_READWRITE)
-	// this `rawptr(strings.clone_to_cstring(string))` is not cool, and no, `rawptr(cstring(string))` did not work.
-	w.WriteProcessMemory(proc_handle, remote, rawptr(strings.clone_to_cstring(module_path)), len(module_path), nil)
+
+	w.WriteProcessMemory(proc_handle, remote, rawptr(module_path_cstring), len(module_path), nil)
 	w.CreateRemoteThread(proc_handle, nil, 0, load_library, remote, 0, nil)
 	w.CloseHandle(proc_handle)
 }
