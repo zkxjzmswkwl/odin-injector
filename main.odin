@@ -2,6 +2,7 @@ package main
 
 import "core:fmt"
 import "core:strings"
+import "core:os"
 import w "core:sys/windows"
 
 foreign import k32 "system:kernel32.lib"
@@ -29,9 +30,22 @@ foreign k32 {
 	OpenProcess              :: proc(dwDesiredAccess: u32, bInheritHandle: int, dwProcessId: u32) -> w.HANDLE ---
 }
 //----------------------------------------------------------------------------------------------------
-filter_processes :: proc(file_name: string) -> u32 {
-	fmt.println("filter_processes")
+inject_dll :: proc(process_id: u32, module_path: string) {
+	fmt.println(strings.clone_to_cstring(module_path))
 
+	module_path_cstring := strings.clone_to_cstring(module_path)
+	defer delete(module_path_cstring)
+
+	proc_handle := OpenProcess(0x000F000 | 0x00100000 | 0xFFFF, 0, process_id)
+	load_library := cast(proc "stdcall" (rawptr) -> u32)w.GetProcAddress(w.GetModuleHandleA("kernel32.dll"), "LoadLibraryA")
+	remote := w.VirtualAllocEx(proc_handle, nil, len(module_path), w.MEM_RESERVE | w.MEM_COMMIT, w.PAGE_READWRITE)
+
+	w.WriteProcessMemory(proc_handle, remote, rawptr(module_path_cstring), len(module_path), nil)
+	w.CreateRemoteThread(proc_handle, nil, 0, load_library, remote, 0, nil)
+	w.CloseHandle(proc_handle)
+}
+//----------------------------------------------------------------------------------------------------
+inject_all_clients :: proc(file_name: string) -> u32 {
 	process_id: w.DWORD
 	pe32: process_entry
 	pe32.dwSize = size_of(process_entry)
@@ -63,9 +77,13 @@ filter_processes :: proc(file_name: string) -> u32 {
 		built_str := strings.to_string(remote_buffer)
 
 		if strings.contains(built_str, file_name) {
-			fmt.println("Found the rs2 process.")
+			fmt.println("Found a client instance.")
 			process_id = pe32.th32ProcessID
-			break
+
+			dir := os.get_current_directory()
+			dll_loc := strings.concatenate({dir, ".\\MemoryError.dll"})
+			fmt.println(dll_loc);
+			inject_dll(process_id, dll_loc)
 		} 
 	}
 
@@ -73,25 +91,8 @@ filter_processes :: proc(file_name: string) -> u32 {
 	return process_id
 }
 //----------------------------------------------------------------------------------------------------
-inject_dll :: proc(process_id: u32, module_path: string) {
-	fmt.println(strings.clone_to_cstring(module_path))
-
-	module_path_cstring := strings.clone_to_cstring(module_path)
-	defer delete(module_path_cstring)
-
-	proc_handle := OpenProcess(0x000F000 | 0x00100000 | 0xFFFF, 0, process_id)
-	load_library := cast(proc "stdcall" (rawptr) -> u32)w.GetProcAddress(w.GetModuleHandleA("kernel32.dll"), "LoadLibraryA")
-	remote := w.VirtualAllocEx(proc_handle, nil, len(module_path), w.MEM_RESERVE | w.MEM_COMMIT, w.PAGE_READWRITE)
-
-	w.WriteProcessMemory(proc_handle, remote, rawptr(module_path_cstring), len(module_path), nil)
-	w.CreateRemoteThread(proc_handle, nil, 0, load_library, remote, 0, nil)
-	w.CloseHandle(proc_handle)
-}
-//----------------------------------------------------------------------------------------------------
 main :: proc() {
-	process_id := filter_processes("rs2client.exe")
-	fmt.println(process_id)
-	inject_dll(process_id, "C:/Users/Carter/petergriffin/build/RelWithDebInfo/PeterGriffin.dll")
+	inject_all_clients("rs2client.exe")
 }
 //----------------------------------------------------------------------------------------------------
 
