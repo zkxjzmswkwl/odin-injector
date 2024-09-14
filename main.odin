@@ -10,14 +10,14 @@ foreign import k32 "system:kernel32.lib"
 //----------------------------------------------------------------------------------------------------
 // core:sys/windows was missing this structure.
 process_entry :: struct {
-	dwSize: w.DWORD
-	cntUsage: w.DWORD
-	th32ProcessID: w.DWORD
-	th32DefaultHeapID: w.ULONG_PTR
-	th32ModuleID: w.DWORD
-	cntThreads: w.DWORD
-	pcPriClassBase: w.LONG
-	dwFlags: w.DWORD
+	dwSize: w.DWORD,
+	cntUsage: w.DWORD,
+	th32ProcessID: w.DWORD,
+	th32DefaultHeapID: w.ULONG_PTR,
+	th32ModuleID: w.DWORD,
+	cntThreads: w.DWORD,
+	pcPriClassBase: w.LONG,
+	dwFlags: w.DWORD,
 	szExeFile: [260]w.CHAR
 }
 //----------------------------------------------------------------------------------------------------
@@ -27,7 +27,6 @@ foreign k32 {
 	CreateToolhelp32Snapshot :: proc(dwFlags: w.DWORD, th32ProcessID: w.DWORD) -> w.HANDLE                    ---
 	Process32First           :: proc(hSnapshot: w.HANDLE, lppe: ^process_entry) -> int                        ---
 	Process32Next            :: proc(hSnapshot: w.HANDLE, lppe: ^process_entry) -> int                        ---
-	OpenProcess              :: proc(dwDesiredAccess: u32, bInheritHandle: int, dwProcessId: u32) -> w.HANDLE ---
 }
 //----------------------------------------------------------------------------------------------------
 inject_dll :: proc(process_id: u32, module_path: string) {
@@ -36,7 +35,7 @@ inject_dll :: proc(process_id: u32, module_path: string) {
 	module_path_cstring := strings.clone_to_cstring(module_path)
 	defer delete(module_path_cstring)
 
-	proc_handle := OpenProcess(0x000F000 | 0x00100000 | 0xFFFF, 0, process_id)
+	proc_handle := w.OpenProcess(0x000F000 | 0x00100000 | 0xFFFF, false, process_id)
 	load_library := cast(proc "stdcall" (rawptr) -> u32)w.GetProcAddress(w.GetModuleHandleA("kernel32.dll"), "LoadLibraryA")
 	remote := w.VirtualAllocEx(proc_handle, nil, len(module_path), w.MEM_RESERVE | w.MEM_COMMIT, w.PAGE_READWRITE)
 
@@ -81,7 +80,7 @@ inject_all_clients :: proc(file_name: string) -> u32 {
 			process_id = pe32.th32ProcessID
 
 			dir := os.get_current_directory()
-			dll_loc := strings.concatenate({dir, ".\\MemoryError.dll"})
+			dll_loc := strings.concatenate({dir, ".\\DeOppressoLiber.dll"})
 			fmt.println(dll_loc);
 			inject_dll(process_id, dll_loc)
 		} 
@@ -95,4 +94,3 @@ main :: proc() {
 	inject_all_clients("rs2client.exe")
 }
 //----------------------------------------------------------------------------------------------------
-
